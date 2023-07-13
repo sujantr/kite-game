@@ -80,7 +80,11 @@ export default class SceneInit {
   animate() {
     // NOTE: Window is implied.
     // requestAnimationFrame(this.animate.bind(this));
-    window.requestAnimationFrame(this.animate.bind(this));
+    setTimeout(() => {
+      window.requestAnimationFrame(this.animate.bind(this));
+    },
+      1000/8
+    );
     this.render();
     this.stats.update();
     this.controls.update();

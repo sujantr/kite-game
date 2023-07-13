@@ -20,7 +20,7 @@ function App() {
   return (
     <>
   <div>
-    <canvas id="threeJsCanvas"></canvas>
+    <canvas id="threeJsCanvas" ></canvas>
   </div>
     </>
   )
