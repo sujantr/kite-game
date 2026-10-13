@@ -1,104 +1,95 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 import Stats from 'three/examples/jsm/libs/stats.module';
 
+// NOTE: Owns the renderer, scene, camera, lights and the frame loop.
+// Register per-frame logic with onUpdate(fn) and call dispose() on teardown.
 export default class SceneInit {
-  constructor(canvasId) {
-    // NOTE: Core components to initialize Three.js app.
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.fov = 60;
+    this.nearPlane = 0.1;
+    this.farPlane = 1000;
+
     this.scene = undefined;
     this.camera = undefined;
     this.renderer = undefined;
-
-    // NOTE: Camera params;
-    this.fov = 45;
-    this.nearPlane = 1;
-    this.farPlane = 1000;
-    this.canvasId = canvasId;
-
-    // NOTE: Additional components.
     this.clock = undefined;
     this.stats = undefined;
-    this.controls = undefined;
+    this.updaters = [];
+    this.frameId = undefined;
 
-    // NOTE: Lighting is basically required.
-    this.ambientLight = undefined;
-    this.directionalLight = undefined;
+    this.onWindowResize = this.onWindowResize.bind(this);
+    this.animate = this.animate.bind(this);
   }
 
   initialize() {
     this.scene = new THREE.Scene();
+    this.scene.background = new THREE.Color(0x9fd3f5);
+
     this.camera = new THREE.PerspectiveCamera(
       this.fov,
       window.innerWidth / window.innerHeight,
-      1,
-      1000
+      this.nearPlane,
+      this.farPlane
     );
-    this.camera.position.z = 48;
+    this.camera.position.set(0, 5, 12);
+    this.camera.lookAt(0, 0, 0);
+    this.scene.add(this.camera);
 
-    // NOTE: Specify a canvas which is already created in the HTML.
-    const canvas = document.getElementById(this.canvasId);
-    this.renderer = new THREE.WebGLRenderer({
-      canvas,
-      // NOTE: Anti-aliasing smooths out the edges.
-      antialias: true,
-    });
+    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    // this.renderer.shadowMap.enabled = true;
-    document.body.appendChild(this.renderer.domElement);
+    this.renderer.shadowMap.enabled = true;
 
     this.clock = new THREE.Clock();
-    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-    this.stats = Stats();
-    document.body.appendChild(this.stats.dom);
+    if (import.meta.env.DEV) {
+      this.stats = Stats();
+      document.body.appendChild(this.stats.dom);
+    }
 
-    // ambient light which is for the whole scene
-    this.ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-    this.ambientLight.castShadow = true;
-    this.scene.add(this.ambientLight);
+    // sky/ground light for the whole scene, plus a sun that casts shadows
+    this.scene.add(new THREE.HemisphereLight(0xcfe8ff, 0x6b5a3e, 0.8));
+    this.sunLight = new THREE.DirectionalLight(0xffffff, 1);
+    this.sunLight.position.set(20, 40, 20);
+    this.sunLight.castShadow = true;
+    this.scene.add(this.sunLight);
 
-    // directional light - parallel sun rays
-    this.directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-    // this.directionalLight.castShadow = true;
-    this.directionalLight.position.set(0, 32, 64);
-    this.scene.add(this.directionalLight);
+    window.addEventListener('resize', this.onWindowResize);
+  }
 
-    // if window resizes
-    window.addEventListener('resize', () => this.onWindowResize(), false);
-
-    // NOTE: Load space background.
-    // this.loader = new THREE.TextureLoader();
-    // this.scene.background = this.loader.load('./pics/space.jpeg');
-
-    // NOTE: Declare uniforms to pass into glsl shaders.
-    // this.uniforms = {
-    //   u_time: { type: 'f', value: 1.0 },
-    //   colorB: { type: 'vec3', value: new THREE.Color(0xfff000) },
-    //   colorA: { type: 'vec3', value: new THREE.Color(0xffffff) },
-    // };
+  // NOTE: fn is called every frame with (deltaSeconds, elapsedSeconds).
+  onUpdate(fn) {
+    this.updaters.push(fn);
   }
 
   animate() {
-    // NOTE: Window is implied.
-    // requestAnimationFrame(this.animate.bind(this));
-    setTimeout(() => {
-      window.requestAnimationFrame(this.animate.bind(this));
-    },
-      1000/8
-    );
-    this.render();
-    this.stats.update();
-    this.controls.update();
-  }
-
-  render() {
-    // NOTE: Update uniform data on each render.
-    // this.uniforms.u_time.value += this.clock.getDelta();
+    this.frameId = window.requestAnimationFrame(this.animate);
+    // NOTE: Clamp delta so a backgrounded tab doesn't cause a huge jump.
+    const delta = Math.min(this.clock.getDelta(), 0.05);
+    const elapsed = this.clock.elapsedTime;
+    for (const fn of this.updaters) fn(delta, elapsed);
     this.renderer.render(this.scene, this.camera);
+    if (this.stats) this.stats.update();
   }
 
   onWindowResize() {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+
+  dispose() {
+    window.cancelAnimationFrame(this.frameId);
+    window.removeEventListener('resize', this.onWindowResize);
+    if (this.stats) this.stats.dom.remove();
+    this.scene.traverse((obj) => {
+      if (obj.geometry) obj.geometry.dispose();
+      if (obj.material) {
+        const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+        materials.forEach((m) => m.dispose());
+      }
+    });
+    this.renderer.dispose();
+    this.updaters = [];
   }
 }
