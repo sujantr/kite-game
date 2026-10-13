@@ -36,6 +36,8 @@ export default class SceneInit {
       this.nearPlane,
       this.farPlane
     );
+    // NOTE: In the scene so things attached to it (the first-person lattai) render.
+    this.scene.add(this.camera);
 
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createLattai } from './Kite';
 
 export const PLAYER_RADIUS = 0.35;
 export const PLAYER_HEIGHT = 1.8;
@@ -49,6 +50,7 @@ export default class Player {
     this.onGround = true;
     this.airTime = 0;
     this.walkPhase = 0;
+    this.holding = false;
     this.jumpHeld = false;
 
     this.buildModel();
@@ -111,7 +113,18 @@ export default class Player {
     this.rightLeg.add(shoe.clone());
 
     this.upperBody.add(this.leftArm, this.rightArm);
+
+    // NOTE: Lattai held out in front with a hand on each end of the axle.
+    this.lattai = createLattai();
+    this.lattai.position.set(0, 1.24, -0.59);
+    this.lattai.visible = false;
+    this.upperBody.add(this.lattai);
     this.body.add(this.leftLeg, this.rightLeg);
+  }
+
+  setHolding(holding) {
+    this.holding = holding;
+    this.lattai.visible = holding;
   }
 
   setUpperBodyVisible(visible) {
@@ -244,16 +257,29 @@ export default class Player {
       const swing = Math.sin(this.walkPhase) * Math.min(speed / RUN_SPEED, 1) * 0.9;
       this.leftLeg.rotation.x = swing;
       this.rightLeg.rotation.x = -swing;
-      this.leftArm.rotation.x = -swing * 0.8;
-      this.rightArm.rotation.x = swing * 0.8;
+      if (!this.holding) {
+        this.leftArm.rotation.x = -swing * 0.8;
+        this.rightArm.rotation.x = swing * 0.8;
+      }
       this.body.position.y = Math.abs(Math.sin(this.walkPhase)) * Math.min(speed / RUN_SPEED, 1) * 0.06;
     } else {
       // NOTE: Airborne pose: legs tucked, arms up.
       const blend = 1 - Math.exp(-10 * delta);
       this.leftLeg.rotation.x += (-0.5 - this.leftLeg.rotation.x) * blend;
       this.rightLeg.rotation.x += (0.3 - this.rightLeg.rotation.x) * blend;
-      this.leftArm.rotation.x += (-2.4 - this.leftArm.rotation.x) * blend;
-      this.rightArm.rotation.x += (-2.4 - this.rightArm.rotation.x) * blend;
+      if (!this.holding) {
+        this.leftArm.rotation.x += (-2.4 - this.leftArm.rotation.x) * blend;
+        this.rightArm.rotation.x += (-2.4 - this.rightArm.rotation.x) * blend;
+      }
+    }
+
+    // NOTE: Arms reach forward and in so both hands grip the lattai handles.
+    if (this.holding) {
+      this.leftArm.rotation.set(1.2, 0, 0.3);
+      this.rightArm.rotation.set(1.2, 0, -0.3);
+    } else {
+      this.leftArm.rotation.z = 0;
+      this.rightArm.rotation.z = 0;
     }
   }
 }

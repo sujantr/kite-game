@@ -7,6 +7,7 @@ const MAX_DISTANCE = 12;
 const SHOULDER_OFFSET = 0.55;
 const CAMERA_PADDING = 0.3;
 const BOOM_RETURN_RATE = 4;
+const MIN_CAMERA_HEIGHT = 0.3;
 
 // NOTE: One rig for both views. First person is just third person with the
 // boom shortened to zero, so switching views animates smoothly between them.
@@ -90,6 +91,10 @@ export default class CameraRig {
       this.raycaster.far = limit + CAMERA_PADDING;
       const hit = this.raycaster.intersectObjects(this.world.solids, false)[0];
       if (hit) limit = Math.max(0, hit.distance - CAMERA_PADDING);
+      // NOTE: Looking up swings the camera down; keep it above the ground.
+      if (this.forward.y > 0) {
+        limit = Math.min(limit, Math.max(0, (origin.y - MIN_CAMERA_HEIGHT) / this.forward.y));
+      }
     }
 
     // NOTE: Snap in at once so walls are never seen through, but ease back

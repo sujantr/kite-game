@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { WIND, WIND_HEADING } from './Wind';
+import { KITE_COLORS, createKiteMesh, createLattai, createString, layString } from './Kite';
 
 // NOTE: Deterministic RNG so the town layout is the same on every load.
 function mulberry32(seed) {
@@ -20,10 +22,6 @@ const CELL = 22;
 const GRID = 3;
 
 const WALL_COLORS = [0xb5543c, 0xa84a35, 0xf1e6d2, 0xe8c27a, 0xd98b5f, 0xc9d6c2, 0xe6b8a2];
-const KITE_COLORS = [0xe63946, 0xffb703, 0x219ebc, 0x8338ec, 0x2a9d8f, 0xfb5607, 0xff006e, 0x06d6a0];
-
-export const WIND = new THREE.Vector3(1, 0, 0.35).normalize();
-
 // NOTE: One window bay of a Newari-style facade, drawn in greyscale-on-white
 // so each house can tint it with its own wall colour.
 function createFacadeTexture() {
@@ -89,6 +87,7 @@ export default class World {
     this.buildTrees();
     this.buildHills();
     this.buildKites();
+    this.buildPickups();
     this.buildClouds();
   }
 
@@ -381,30 +380,10 @@ export default class World {
     const rng = this.rng;
     const anchors = this.rooftops.filter(() => rng() < 0.45);
     anchors.forEach((roof, idx) => {
-      const colorA = KITE_COLORS[idx % KITE_COLORS.length];
-      const colorB = KITE_COLORS[(idx + 3) % KITE_COLORS.length];
-
-      // NOTE: A two-tone diamond kite (patang) built from two triangles.
-      const kite = new THREE.Group();
-      const half = (color, sign) => {
-        const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute(
-          'position',
-          new THREE.Float32BufferAttribute([0, 1.1, 0, sign * 0.95, 0, 0, 0, -1.3, 0], 3)
-        );
-        geometry.computeVertexNormals();
-        return new THREE.Mesh(
-          geometry,
-          new THREE.MeshLambertMaterial({ color, side: THREE.DoubleSide })
-        );
-      };
-      kite.add(half(colorA, -1), half(colorB, 1));
-      const tail = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.25, 1.2),
-        new THREE.MeshLambertMaterial({ color: colorB, side: THREE.DoubleSide })
+      const kite = createKiteMesh(
+        KITE_COLORS[idx % KITE_COLORS.length],
+        KITE_COLORS[(idx + 3) % KITE_COLORS.length]
       );
-      tail.position.y = -1.9;
-      kite.add(tail);
       kite.scale.setScalar(1.6);
       this.scene.add(kite);
 
@@ -413,25 +392,94 @@ export default class World {
         roof.y + 1.2,
         roof.z + (rng() - 0.5) * roof.d * 0.6
       );
-      const segments = 16;
-      const line = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints(new Array(segments + 1).fill(0).map(() => new THREE.Vector3())),
-        new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55 })
-      );
-      line.frustumCulled = false;
+      const { line, points } = createString(16, 0xffffff, 0.55);
       this.scene.add(line);
 
       this.kites.push({
         kite,
         line,
+        points,
         anchor,
-        segments,
         length: 40 + rng() * 40,
         elevation: 0.55 + rng() * 0.35,
         heading: (rng() - 0.5) * 0.6,
         phase: rng() * Math.PI * 2,
+        // NOTE: How hard this flyer fights in a pecha (kite fight).
+        strength: 0.6 + rng() * 0.8,
+        cut: false,
+        hook: null,
+        respawnTimer: 0,
+        velocity: new THREE.Vector3(),
       });
     });
+  }
+
+  // NOTE: Lattai lying around waiting to be picked up, marked by a glowing ring.
+  buildPickups() {
+    this.pickups = [];
+    const spots = [
+      new THREE.Vector3(2.5, 0, 9.5),
+      new THREE.Vector3(-14, 0, 2),
+      new THREE.Vector3(16, 0, -4),
+    ];
+    this.rooftops
+      .filter((roof) => roof.stairs)
+      .slice(0, 4)
+      .forEach((roof) => spots.push(new THREE.Vector3(roof.x, roof.y, roof.z)));
+    spots.forEach((spot, idx) => this.addPickup(spot, KITE_COLORS[idx % KITE_COLORS.length]));
+  }
+
+  addPickup(position, color = KITE_COLORS[0]) {
+    const group = new THREE.Group();
+    const lattai = createLattai(color);
+    lattai.position.y = 0.13;
+    lattai.rotation.y = 0.6;
+    const kite = createKiteMesh(color, 0xffffff);
+    kite.scale.setScalar(0.45);
+    kite.rotation.x = -Math.PI / 2;
+    kite.position.set(0.55, 0.04, 0.25);
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.75, 0.9, 32),
+      new THREE.MeshBasicMaterial({ color: 0xffd166, transparent: true, opacity: 0.6, depthWrite: false })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.03;
+    group.add(lattai, kite, ring);
+    group.position.copy(position);
+    this.scene.add(group);
+    const pickup = { group, ring, position: position.clone() };
+    this.pickups.push(pickup);
+    return pickup;
+  }
+
+  removePickup(pickup) {
+    this.scene.remove(pickup.group);
+    this.pickups = this.pickups.filter((p) => p !== pickup);
+  }
+
+  nearestPickup(position, range) {
+    let best = null;
+    let bestDistance = range;
+    for (const pickup of this.pickups) {
+      const d = Math.hypot(
+        pickup.position.x - position.x,
+        (pickup.position.y - position.y) * 2,
+        pickup.position.z - position.z
+      );
+      if (d < bestDistance) {
+        best = pickup;
+        bestDistance = d;
+      }
+    }
+    return best;
+  }
+
+  cutKite(k) {
+    k.cut = true;
+    k.hook = null;
+    k.respawnTimer = 25;
+    k.velocity.copy(WIND).multiplyScalar(5);
+    k.velocity.y = 1.5;
   }
 
   buildClouds() {
@@ -453,43 +501,68 @@ export default class World {
   }
 
   update(delta, elapsed) {
-    const tmpTarget = new THREE.Vector3();
-    const control = new THREE.Vector3();
-    const curve = new THREE.QuadraticBezierCurve3();
+    const kitePosition = new THREE.Vector3();
 
     for (const k of this.kites) {
+      if (k.cut) {
+        this.updateCutKite(k, delta);
+        continue;
+      }
       // NOTE: Kites hang downwind of their roof and dance in the gusts.
       const gust = Math.sin(elapsed * 0.7 + k.phase) * 0.12 + Math.sin(elapsed * 2.3 + k.phase) * 0.04;
-      const heading = Math.atan2(WIND.z, WIND.x) + k.heading + gust;
+      const heading = WIND_HEADING + k.heading + gust;
       const elevation = k.elevation + Math.sin(elapsed * 0.9 + k.phase * 2) * 0.08;
-      tmpTarget.set(
+      kitePosition.set(
         Math.cos(heading) * Math.cos(elevation),
         Math.sin(elevation),
         Math.sin(heading) * Math.cos(elevation)
       ).multiplyScalar(k.length).add(k.anchor);
-      k.kite.position.copy(tmpTarget);
-      k.kite.lookAt(k.anchor.x, tmpTarget.y, k.anchor.z);
+      k.kite.position.copy(kitePosition);
+      k.kite.lookAt(k.anchor.x, kitePosition.y, k.anchor.z);
       k.kite.rotateZ(Math.sin(elapsed * 1.7 + k.phase) * 0.35);
       k.kite.rotateX(-0.35);
+      // NOTE: While hooked in a pecha the string bends through the hook point.
+      layString(k.line, k.points, k.anchor, kitePosition, 0.12, k.hook);
+    }
 
-      // NOTE: The string sags towards the ground between roof and kite.
-      control.copy(k.anchor).lerp(tmpTarget, 0.5);
-      control.y -= k.length * 0.12;
-      curve.v0.copy(k.anchor);
-      curve.v1.copy(control);
-      curve.v2.copy(tmpTarget);
-      const positions = k.line.geometry.attributes.position;
-      for (let s = 0; s <= k.segments; s++) {
-        curve.getPoint(s / k.segments, tmpTarget);
-        positions.setXYZ(s, tmpTarget.x, tmpTarget.y, tmpTarget.z);
-      }
-      positions.needsUpdate = true;
+    for (const pickup of this.pickups) {
+      const pulse = 0.5 + 0.5 * Math.sin(elapsed * 3);
+      pickup.ring.material.opacity = 0.3 + 0.4 * pulse;
+      pickup.ring.scale.setScalar(1 + 0.08 * pulse);
     }
 
     for (const cloud of this.clouds) {
       cloud.position.addScaledVector(WIND, delta * 2);
       if (cloud.position.x > 500) cloud.position.x -= 1000;
       if (cloud.position.z > 500) cloud.position.z -= 1000;
+    }
+  }
+
+  // NOTE: A cut kite drifts away trailing its string, then a new one goes up later.
+  updateCutKite(k, delta) {
+    k.respawnTimer -= delta;
+    if (k.respawnTimer <= 0) {
+      k.cut = false;
+      k.kite.visible = true;
+      k.line.visible = true;
+      return;
+    }
+    if (!k.kite.visible) return;
+    k.velocity.addScaledVector(WIND, 1.5 * delta);
+    k.velocity.y = Math.max(k.velocity.y - 1.2 * delta, -2.5);
+    k.kite.position.addScaledVector(k.velocity, delta);
+    k.kite.rotateZ(delta * 3);
+    const positions = k.line.geometry.attributes.position;
+    k.points.forEach((pt, s) => {
+      const t = s / (k.points.length - 1);
+      pt.copy(k.kite.position).addScaledVector(WIND, -t * 6);
+      pt.y -= t * 10;
+      positions.setXYZ(s, pt.x, pt.y, pt.z);
+    });
+    positions.needsUpdate = true;
+    if (k.kite.position.y < 0) {
+      k.kite.visible = false;
+      k.line.visible = false;
     }
   }
 }
