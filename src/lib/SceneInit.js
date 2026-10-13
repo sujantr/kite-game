@@ -1,28 +1,31 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 import Stats from 'three/examples/jsm/libs/stats.module';
 
 export default class SceneInit {
-  constructor(canvasId) {
+  constructor(canvas) {
     // NOTE: Core components to initialize Three.js app.
+    this.canvas = canvas;
     this.scene = undefined;
     this.camera = undefined;
     this.renderer = undefined;
 
-    // NOTE: Camera params;
-    this.fov = 45;
-    this.nearPlane = 1;
-    this.farPlane = 1000;
-    this.canvasId = canvasId;
+    // NOTE: Camera params.
+    this.fov = 70;
+    this.nearPlane = 0.1;
+    this.farPlane = 1500;
 
     // NOTE: Additional components.
     this.clock = undefined;
     this.stats = undefined;
-    this.controls = undefined;
+    this.updaters = [];
+    this.frameId = undefined;
 
     // NOTE: Lighting is basically required.
-    this.ambientLight = undefined;
-    this.directionalLight = undefined;
+    this.hemisphereLight = undefined;
+    this.sunLight = undefined;
+
+    this.onWindowResize = this.onWindowResize.bind(this);
+    this.animate = this.animate.bind(this);
   }
 
   initialize() {
@@ -30,69 +33,74 @@ export default class SceneInit {
     this.camera = new THREE.PerspectiveCamera(
       this.fov,
       window.innerWidth / window.innerHeight,
-      1,
-      1000
+      this.nearPlane,
+      this.farPlane
     );
-    this.camera.position.z = 48;
+    // NOTE: In the scene so things attached to it (the first-person lattai) render.
+    this.scene.add(this.camera);
 
-    // NOTE: Specify a canvas which is already created in the HTML.
-    const canvas = document.getElementById(this.canvasId);
     this.renderer = new THREE.WebGLRenderer({
-      canvas,
+      canvas: this.canvas,
       // NOTE: Anti-aliasing smooths out the edges.
       antialias: true,
     });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    // this.renderer.shadowMap.enabled = true;
-    document.body.appendChild(this.renderer.domElement);
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     this.clock = new THREE.Clock();
-    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-    this.stats = Stats();
-    document.body.appendChild(this.stats.dom);
+    if (import.meta.env.DEV) {
+      this.stats = Stats();
+      document.body.appendChild(this.stats.dom);
+    }
 
-    // ambient light which is for the whole scene
-    this.ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-    this.ambientLight.castShadow = true;
-    this.scene.add(this.ambientLight);
+    // sky/ground light which is for the whole scene
+    this.hemisphereLight = new THREE.HemisphereLight(0xcfe8ff, 0x6b5a3e, 0.75);
+    this.scene.add(this.hemisphereLight);
 
-    // directional light - parallel sun rays
-    this.directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-    // this.directionalLight.castShadow = true;
-    this.directionalLight.position.set(0, 32, 64);
-    this.scene.add(this.directionalLight);
+    // directional light - parallel sun rays, follows the player so the
+    // shadow map only has to cover the area around them
+    this.sunLight = new THREE.DirectionalLight(0xfff1d6, 1.1);
+    this.sunLight.castShadow = true;
+    this.sunLight.shadow.mapSize.set(2048, 2048);
+    this.sunLight.shadow.camera.left = -60;
+    this.sunLight.shadow.camera.right = 60;
+    this.sunLight.shadow.camera.top = 60;
+    this.sunLight.shadow.camera.bottom = -60;
+    this.sunLight.shadow.camera.near = 1;
+    this.sunLight.shadow.camera.far = 250;
+    this.sunLight.shadow.bias = -0.0005;
+    this.sunOffset = new THREE.Vector3(60, 100, 40);
+    this.scene.add(this.sunLight);
+    this.scene.add(this.sunLight.target);
 
     // if window resizes
-    window.addEventListener('resize', () => this.onWindowResize(), false);
+    window.addEventListener('resize', this.onWindowResize, false);
+  }
 
-    // NOTE: Load space background.
-    // this.loader = new THREE.TextureLoader();
-    // this.scene.background = this.loader.load('./pics/space.jpeg');
+  // NOTE: Register a function called every frame with (deltaSeconds, elapsedSeconds).
+  onUpdate(fn) {
+    this.updaters.push(fn);
+  }
 
-    // NOTE: Declare uniforms to pass into glsl shaders.
-    // this.uniforms = {
-    //   u_time: { type: 'f', value: 1.0 },
-    //   colorB: { type: 'vec3', value: new THREE.Color(0xfff000) },
-    //   colorA: { type: 'vec3', value: new THREE.Color(0xffffff) },
-    // };
+  // NOTE: Keep the shadow-casting sun centred on a point of interest.
+  followSun(position) {
+    this.sunLight.target.position.copy(position);
+    this.sunLight.position.copy(position).add(this.sunOffset);
   }
 
   animate() {
-    // NOTE: Window is implied.
-    // requestAnimationFrame(this.animate.bind(this));
-    setTimeout(() => {
-      window.requestAnimationFrame(this.animate.bind(this));
-    },
-      1000/8
-    );
+    this.frameId = window.requestAnimationFrame(this.animate);
+    // NOTE: Clamp delta so a backgrounded tab doesn't teleport the player.
+    const delta = Math.min(this.clock.getDelta(), 0.05);
+    const elapsed = this.clock.elapsedTime;
+    for (const fn of this.updaters) fn(delta, elapsed);
     this.render();
-    this.stats.update();
-    this.controls.update();
+    if (this.stats) this.stats.update();
   }
 
   render() {
-    // NOTE: Update uniform data on each render.
-    // this.uniforms.u_time.value += this.clock.getDelta();
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -100,5 +108,23 @@ export default class SceneInit {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+
+  dispose() {
+    window.cancelAnimationFrame(this.frameId);
+    window.removeEventListener('resize', this.onWindowResize, false);
+    if (this.stats) this.stats.dom.remove();
+    this.scene.traverse((obj) => {
+      if (obj.geometry) obj.geometry.dispose();
+      if (obj.material) {
+        const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+        materials.forEach((m) => {
+          if (m.map) m.map.dispose();
+          m.dispose();
+        });
+      }
+    });
+    this.renderer.dispose();
+    this.updaters = [];
   }
 }
