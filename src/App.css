@@ -16,8 +16,10 @@
   flex-wrap: wrap;
   justify-content: center;
   align-items: center;
-  gap: 8px 14px;
+  gap: 6px 14px;
+  width: max-content;
   max-width: calc(100vw - 32px);
+  box-sizing: border-box;
   padding: 8px 14px;
   border-radius: 10px;
   background: rgba(16, 24, 32, 0.6);
@@ -30,6 +32,10 @@
 .hud-view {
   font-weight: 700;
   color: #ffd166;
+}
+
+.hud-key {
+  white-space: nowrap;
 }
 
 .hud kbd {

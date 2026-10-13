@@ -21,10 +21,11 @@ function App() {
         <span className="hud-view">
           {state.view === 'first' ? 'First person' : 'Third person'}
         </span>
-        <span className="hud-keys">
-          <kbd>W A S D</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump ·{' '}
-          <kbd>V</kbd> / scroll switch view · <kbd>Esc</kbd> release mouse
-        </span>
+        <span className="hud-key"><kbd>W A S D</kbd> move</span>
+        <span className="hud-key"><kbd>Shift</kbd> run</span>
+        <span className="hud-key"><kbd>Space</kbd> jump</span>
+        <span className="hud-key"><kbd>V</kbd> / scroll switch view</span>
+        <span className="hud-key"><kbd>Esc</kbd> release mouse</span>
       </div>
       {!state.locked && (
         <div className="start-hint">Click to look around</div>

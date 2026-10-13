@@ -6,6 +6,7 @@ const MIN_DISTANCE = 2;
 const MAX_DISTANCE = 12;
 const SHOULDER_OFFSET = 0.55;
 const CAMERA_PADDING = 0.3;
+const BOOM_RETURN_RATE = 4;
 
 // NOTE: One rig for both views. First person is just third person with the
 // boom shortened to zero, so switching views animates smoothly between them.
@@ -19,6 +20,7 @@ export default class CameraRig {
     this.firstPerson = false;
     this.thirdPersonDistance = 5;
     this.distance = this.thirdPersonDistance;
+    this.boom = this.distance;
     this.raycaster = new THREE.Raycaster();
     this.pivot = new THREE.Vector3();
     this.forward = new THREE.Vector3();
@@ -80,15 +82,21 @@ export default class CameraRig {
     // NOTE: Over-the-shoulder offset fades in with the boom length.
     const shoulder = SHOULDER_OFFSET * Math.min(this.distance / MIN_DISTANCE, 1);
     const origin = this.pivot.clone().addScaledVector(this.right, shoulder);
-    let boom = this.distance;
+    let limit = this.distance;
 
     // NOTE: Pull the camera in if a wall or roof is between it and the player.
-    if (boom > 0.05) {
+    if (limit > 0.05) {
       this.raycaster.set(origin, this.forward.clone().negate());
-      this.raycaster.far = boom + CAMERA_PADDING;
+      this.raycaster.far = limit + CAMERA_PADDING;
       const hit = this.raycaster.intersectObjects(this.world.solids, false)[0];
-      if (hit) boom = Math.max(0, hit.distance - CAMERA_PADDING);
+      if (hit) limit = Math.max(0, hit.distance - CAMERA_PADDING);
     }
+
+    // NOTE: Snap in at once so walls are never seen through, but ease back
+    // out once they're clear so passing obstacles don't make the view pop.
+    if (limit < this.boom) this.boom = limit;
+    else this.boom += (limit - this.boom) * (1 - Math.exp(-BOOM_RETURN_RATE * delta));
+    const boom = this.boom;
 
     if (boom < 0.05) {
       // NOTE: Push the eye slightly forward so the shoulders stay out of view.
